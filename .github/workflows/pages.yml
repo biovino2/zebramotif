@@ -1,0 +1,70 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - env:
+          DESTINATION_URL: ${{ secrets.DESTINATION_URL }}
+        run: |
+          python3 - <<'BUILD'
+          import html
+          import os
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          target = os.environ.get("DESTINATION_URL", "").strip()
+          if target:
+              try:
+                  url = urlsplit(target)
+                  owner, repository = os.environ["GITHUB_REPOSITORY"].split("/", 1)
+                  invalid = (
+                      url.scheme not in ("https", "http")
+                      or not url.hostname
+                      or url.username is not None
+                      or url.password is not None
+                      or chr(92) in target
+                      or any(ord(char) < 32 or ord(char) == 127 for char in target)
+                      or (
+                          url.hostname == owner.lower() + ".github.io"
+                          and url.path.rstrip("/") in ("/" + repository, "/" + repository + "/index.html")
+                      )
+                  )
+                  url.port
+                  if invalid:
+                      raise ValueError()
+              except ValueError:
+                  raise SystemExit("Invalid destination URL")
+
+          page = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Redirect</title>'
+          if target:
+              escaped = html.escape(target, quote=True)
+              page += '<meta http-equiv="refresh" content="0;url=' + escaped + '"></head><body><a href="' + escaped + '">Continue</a>'
+          else:
+              page += '</head><body>Coming soon.'
+          page += '</body></html>'
+          Path("_site").mkdir(exist_ok=True)
+          Path("_site/index.html").write_text(page, encoding="utf-8")
+          BUILD
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b
+        with:
+          path: _site
+          retention-days: 1
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+        id: deploy
